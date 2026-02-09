@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jira-helper"
+version = "0.1.0"
+description = "Jira Cloud REST API로 내 티켓 조회·검색·상태 전환하는 CLI"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.28.0",
+    "python-dotenv>=1.0.0",
+    "mcp>=1.26.0",
+]
+
+[project.scripts]
+jira = "jira_cli:main"
+jira-mcp = "mcp_server:main"
+
+[tool.setuptools]
+py-modules = ["jira_cli", "mcp_server"]
