@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Jira 티켓 관리 CLI - 내 이슈 조회, 검색, 상세 보기
+Jira 티켓 관리 CLI - 내 이슈 조회, 검색, 상세 보기, 티켓 생성·수정
 """
 import os
 import sys
@@ -51,6 +51,15 @@ def api_get(path, params=None):
 def api_post(path, json_data=None):
     url = f"{JIRA_BASE_URL}/rest/api/3{path}"
     r = requests.post(url, auth=get_auth(), json=json_data, timeout=30)
+    r.raise_for_status()
+    if r.status_code == 204 or not r.text.strip():
+        return {}
+    return r.json()
+
+
+def api_put(path, json_data=None):
+    url = f"{JIRA_BASE_URL}/rest/api/3{path}"
+    r = requests.put(url, auth=get_auth(), json=json_data, timeout=30)
     r.raise_for_status()
     if r.status_code == 204 or not r.text.strip():
         return {}
@@ -132,6 +141,85 @@ def search(jql, max_results=20):
         "fields": ["summary", "status", "priority", "updated", "issuetype"],
     })
     return data.get("issues", [])
+
+
+def _description_to_adf(plain_text):
+    """플레인 텍스트를 Jira Cloud ADF(Atlassian Document Format)로 변환."""
+    if not (plain_text or plain_text.strip()):
+        return None
+    text = plain_text.strip()
+    # 한 줄이면 paragraph 하나, 여러 줄이면 줄마다 paragraph
+    blocks = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        blocks.append({
+            "type": "paragraph",
+            "content": [{"type": "text", "text": line}],
+        })
+    if not blocks:
+        return None
+    return {"type": "doc", "version": 1, "content": blocks}
+
+
+def create_issue(
+    project_key,
+    summary,
+    issuetype="Task",
+    description=None,
+    assign_to_self=False,
+    custom_fields=None,
+):
+    """티켓을 생성하고 생성된 이슈 키를 반환.
+    project_key: 프로젝트 키 (예: PROJ)
+    summary: 제목
+    issuetype: 이슈 타입 이름 (예: Task, Bug, Story). 기본 Task.
+    description: 본문 플레인 텍스트 (선택)
+    assign_to_self: True면 현재 사용자에게 담당자 지정
+    custom_fields: 프로젝트별 필수 커스텀 필드 { "customfield_12345": value } (선택)
+    반환: (issue_key, browse_url) 또는 실패 시 예외.
+    """
+    fields = {
+        "project": {"key": project_key.strip().upper()},
+        "summary": summary.strip(),
+        "issuetype": {"name": issuetype.strip()},
+    }
+    if description:
+        adf = _description_to_adf(description)
+        if adf:
+            fields["description"] = adf
+    if assign_to_self:
+        me = api_get("/myself")
+        fields["assignee"] = {"accountId": me.get("accountId")}
+    if custom_fields:
+        fields.update(custom_fields)
+    data = api_post("/issue", json_data={"fields": fields})
+    key = data.get("key")
+    url = f"{JIRA_BASE_URL}/browse/{key}" if key else ""
+    return key, url
+
+
+def update_issue(issue_key, summary=None, description=None, assign_to_self=False):
+    """티켓 필드를 수정합니다. 지정한 필드만 변경됩니다.
+    summary: 제목 (None이면 변경 안 함)
+    description: 본문 플레인 텍스트 (None이면 변경 안 함)
+    assign_to_self: True면 담당자를 현재 사용자로 설정
+    """
+    fields = {}
+    if summary is not None:
+        fields["summary"] = summary.strip()
+    if description is not None:
+        adf = _description_to_adf(description)
+        if adf:
+            fields["description"] = adf
+    if assign_to_self:
+        me = api_get("/myself")
+        fields["assignee"] = {"accountId": me.get("accountId")}
+    if not fields:
+        return False, "변경할 필드를 지정해주세요. (--summary, --description, --assign-me 중 하나 이상)"
+    api_put(f"/issue/{issue_key}", json_data={"fields": fields})
+    return True, f"{issue_key} 수정되었습니다."
 
 
 def print_issue_list(issues):
@@ -221,6 +309,21 @@ def main():
     p_transition.add_argument("issue_key", help="이슈 키 (예: PROJ-123)")
     p_transition.add_argument("target_status", help="목표 상태 (예: In Progress, Resolved, Closed)")
 
+    # 티켓 생성
+    p_create = sub.add_parser("create", help="티켓 생성 (예: create PROJ '제목' [옵션])")
+    p_create.add_argument("project", help="프로젝트 키 (예: PROJ)")
+    p_create.add_argument("summary", help="티켓 제목")
+    p_create.add_argument("--type", dest="issuetype", default="Task", help="이슈 타입 (기본: Task)")
+    p_create.add_argument("--description", "-d", help="설명 (플레인 텍스트)")
+    p_create.add_argument("--assign-me", action="store_true", help="나에게 담당자 지정")
+
+    # 티켓 수정
+    p_edit = sub.add_parser("edit", help="티켓 수정 (제목·설명·담당자)")
+    p_edit.add_argument("issue_key", help="이슈 키 (예: PROJ-123)")
+    p_edit.add_argument("--summary", "-s", help="새 제목")
+    p_edit.add_argument("--description", "-d", help="새 설명 (플레인 텍스트)")
+    p_edit.add_argument("--assign-me", action="store_true", help="나에게 담당자 지정")
+
     args = parser.parse_args()
 
     if args.cmd == "list":
@@ -254,6 +357,26 @@ def main():
         ok, msg = transition_to_status(args.issue_key, args.target_status)
         print(f"\n{msg}")
 
+    elif args.cmd == "create":
+        key, url = create_issue(
+            project_key=args.project,
+            summary=args.summary,
+            issuetype=args.issuetype,
+            description=args.description,
+            assign_to_self=args.assign_me,
+        )
+        print(f"\n생성됨: {key}")
+        print(f"  {url}")
+
+    elif args.cmd == "edit":
+        ok, msg = update_issue(
+            issue_key=args.issue_key,
+            summary=args.summary,
+            description=args.description,
+            assign_to_self=args.assign_me,
+        )
+        print(f"\n{msg}")
+
     else:
         parser.print_help()
         print("\n예시:")
@@ -261,6 +384,8 @@ def main():
         print("  python jira_cli.py list --status done # 내 완료 티켓")
         print("  python jira_cli.py show PROJ-123      # 티켓 상세")
         print('  python jira_cli.py search "project = MYPROJ"  # JQL 검색')
+        print("  python jira_cli.py create PROJ '제목' --assign-me  # 티켓 생성")
+        print("  python jira_cli.py edit PROJ-123 -s '새 제목' -d '새 설명'  # 티켓 수정")
 
 
 if __name__ == "__main__":

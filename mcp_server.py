@@ -21,7 +21,7 @@ import jira_cli
 
 mcp = FastMCP(
     "jira-helper",
-    instructions="Jira Cloud 티켓 조회·검색 (내 이슈 목록, 상세, JQL 검색)",
+    instructions="Jira Cloud 티켓 조회·검색·생성·수정 (내 이슈 목록, 상세, JQL 검색, 티켓 생성/수정)",
 )
 
 
@@ -76,6 +76,59 @@ def jira_transition(issue_key: str, target_status: str) -> str:
     """
     try:
         ok, msg = jira_cli.transition_to_status(issue_key, target_status)
+        return msg
+    except Exception as e:
+        return f"오류: {e}"
+
+
+@mcp.tool()
+def jira_create(
+    project_key: str,
+    summary: str,
+    issuetype: str = "Task",
+    description: str = "",
+    assign_to_self: bool = False,
+) -> str:
+    """Jira 티켓을 생성합니다.
+    - project_key: 프로젝트 키 (예: PROJ)
+    - summary: 티켓 제목
+    - issuetype: 이슈 타입 (예: Task, Bug, Story). 기본값 Task.
+    - description: 설명(플레인 텍스트). 선택.
+    - assign_to_self: True면 현재 사용자를 담당자로 지정.
+    """
+    try:
+        key, url = jira_cli.create_issue(
+            project_key=project_key,
+            summary=summary,
+            issuetype=issuetype,
+            description=description or None,
+            assign_to_self=assign_to_self,
+        )
+        return f"생성됨: {key}\n{url}"
+    except Exception as e:
+        return f"오류: {e}"
+
+
+@mcp.tool()
+def jira_edit(
+    issue_key: str,
+    summary: str = "",
+    description: str = "",
+    assign_to_self: bool = False,
+) -> str:
+    """Jira 티켓을 수정합니다. 지정한 필드만 변경됩니다.
+    - issue_key: 이슈 키 (예: PROJ-123)
+    - summary: 새 제목. 비우면 변경 안 함.
+    - description: 새 설명(플레인 텍스트). 비우면 변경 안 함.
+    - assign_to_self: True면 현재 사용자를 담당자로 지정.
+    """
+    try:
+        ok, msg = jira_cli.update_issue(
+            issue_key=issue_key,
+            summary=summary or None,
+            description=description or None,
+            assign_to_self=assign_to_self,
+        )
         return msg
     except Exception as e:
         return f"오류: {e}"

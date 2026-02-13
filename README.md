@@ -74,6 +74,14 @@ python jira_cli.py start PROJ-123
 
 # 티켓 상태 변경 (Resolved, Closed 등)
 python jira_cli.py transition PROJ-123 Resolved
+
+# 티켓 생성 (프로젝트, 제목; --type, -d, --assign-me 선택)
+python jira_cli.py create PROJ "새 작업 제목"
+python jira_cli.py create PROJ "버그 요약" --type Bug -d "재현 절차" --assign-me
+
+# 티켓 수정 (제목·설명·담당자)
+python jira_cli.py edit PROJ-123 -s "새 제목"
+python jira_cli.py edit PROJ-123 -d "새 설명" --assign-me
 ```
 
 ## 쉘 별칭 (선택)
@@ -211,6 +219,8 @@ MCP(Model Context Protocol) 서버로 등록하면 Cursor에서 **"지라 티켓
 | **jira_show** | 티켓 한 건 상세 (issue_key) |
 | **jira_search** | JQL 검색 (jql, max_results) |
 | **jira_transition** | 티켓 상태 변경 (issue_key, target_status: In Progress/Resolved/Closed 등) |
+| **jira_create** | 티켓 생성 (project_key, summary, issuetype, description, assign_to_self) |
+| **jira_edit** | 티켓 수정 (issue_key, summary, description, assign_to_self) |
 
 설정은 CLI와 동일하게 **JIRA_ENV**, **.env**(현재 디렉터리), **~/.config/jira-helper/.env** 순으로 로드됩니다.
 
