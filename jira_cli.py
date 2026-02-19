@@ -2,9 +2,11 @@
 """
 Jira 티켓 관리 CLI - 내 이슈 조회, 검색, 상세 보기, 티켓 생성·수정
 """
+import json
 import os
 import sys
 import argparse
+from pathlib import Path
 from urllib.parse import quote
 
 import requests
@@ -143,6 +145,44 @@ def search(jql, max_results=20):
     return data.get("issues", [])
 
 
+def _load_required_fields_config():
+    """필수 커스텀 필드 기본값 설정 로드. env → cwd/config → 패키지 내 config 순."""
+    env_path = os.getenv("JIRA_REQUIRED_FIELDS")
+    if env_path and os.path.isfile(env_path):
+        with open(env_path, encoding="utf-8") as f:
+            return json.load(f)
+    for base in (Path.cwd(), Path(__file__).resolve().parent):
+        path = base / "config" / "required_fields.json"
+        if path.is_file():
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+    return {}
+
+
+def _get_default_custom_fields(project_key, issuetype, description=None):
+    """
+    프로젝트/이슈타입에 대한 필수 커스텀 필드 기본값을 반환.
+    __from_description__: 플레인 텍스트로 치환.
+    __from_description_adf__: ADF(Atlassian Document Format)로 치환 (textarea 커스텀 필드용).
+    """
+    config = _load_required_fields_config()
+    proj = config.get((project_key or "").strip().upper(), {})
+    defaults = proj.get((issuetype or "").strip(), {})
+    if not defaults:
+        return {}
+    text_fallback = (description or "").strip() or "재현 방법/기대 결과를 설명에 기입해주세요."
+    out = {}
+    for k, v in defaults.items():
+        if v == "__from_description__":
+            out[k] = text_fallback
+        elif v == "__from_description_adf__":
+            adf = _description_to_adf(text_fallback)
+            out[k] = adf if adf else {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": text_fallback}]}]}
+        else:
+            out[k] = v
+    return out
+
+
 def _description_to_adf(plain_text):
     """플레인 텍스트를 Jira Cloud ADF(Atlassian Document Format)로 변환."""
     if not (plain_text or plain_text.strip()):
@@ -192,6 +232,10 @@ def create_issue(
     if assign_to_self:
         me = api_get("/myself")
         fields["assignee"] = {"accountId": me.get("accountId")}
+    # 프로젝트/이슈타입별 필수 커스텀 필드 기본값 적용 (config/required_fields.json)
+    default_custom = _get_default_custom_fields(project_key, issuetype, description)
+    if default_custom:
+        fields.update(default_custom)
     if custom_fields:
         fields.update(custom_fields)
     data = api_post("/issue", json_data={"fields": fields})
@@ -316,6 +360,11 @@ def main():
     p_create.add_argument("--type", dest="issuetype", default="Task", help="이슈 타입 (기본: Task)")
     p_create.add_argument("--description", "-d", help="설명 (플레인 텍스트)")
     p_create.add_argument("--assign-me", action="store_true", help="나에게 담당자 지정")
+    p_create.add_argument(
+        "--custom-fields",
+        metavar="JSON|@파일경로",
+        help="커스텀 필드 덮어쓰기 (JSON 문자열 또는 @path). 예: '{\"customfield_10648\":{\"id\":\"12601\"}}'",
+    )
 
     # 티켓 수정
     p_edit = sub.add_parser("edit", help="티켓 수정 (제목·설명·담당자)")
@@ -358,12 +407,21 @@ def main():
         print(f"\n{msg}")
 
     elif args.cmd == "create":
+        custom_fields = None
+        if getattr(args, "custom_fields", None):
+            raw = args.custom_fields.strip()
+            if raw.startswith("@"):
+                with open(raw[1:].strip(), encoding="utf-8") as f:
+                    custom_fields = json.load(f)
+            else:
+                custom_fields = json.loads(raw)
         key, url = create_issue(
             project_key=args.project,
             summary=args.summary,
             issuetype=args.issuetype,
             description=args.description,
             assign_to_self=args.assign_me,
+            custom_fields=custom_fields,
         )
         print(f"\n생성됨: {key}")
         print(f"  {url}")

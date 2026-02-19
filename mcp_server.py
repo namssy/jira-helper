@@ -88,21 +88,30 @@ def jira_create(
     issuetype: str = "Task",
     description: str = "",
     assign_to_self: bool = False,
+    custom_fields_json: str = "",
 ) -> str:
     """Jira 티켓을 생성합니다.
-    - project_key: 프로젝트 키 (예: PROJ)
+    - project_key: 프로젝트 키 (예: PROJ, CLOSET)
     - summary: 티켓 제목
     - issuetype: 이슈 타입 (예: Task, Bug, Story). 기본값 Task.
-    - description: 설명(플레인 텍스트). 선택.
+    - description: 설명(플레인 텍스트). Bug 시 필수 커스텀 필드(재현 방법/기대 결과)에 사용됨.
     - assign_to_self: True면 현재 사용자를 담당자로 지정.
+    - custom_fields_json: 커스텀 필드 덮어쓰기(JSON 문자열). 비우면 config/required_fields.json 기본값 사용.
+      CLOSET Bug 필수 필드: Issue Category, Live/Staging/Both, 기대 결과, 작업 내용/재현 방법, 기능 영향 범위.
+      자세한 옵션은 docs/MCP_REQUIRED_FIELDS.md 참고.
     """
     try:
+        custom_fields = None
+        if custom_fields_json and custom_fields_json.strip():
+            import json
+            custom_fields = json.loads(custom_fields_json.strip())
         key, url = jira_cli.create_issue(
             project_key=project_key,
             summary=summary,
             issuetype=issuetype,
             description=description or None,
             assign_to_self=assign_to_self,
+            custom_fields=custom_fields,
         )
         return f"생성됨: {key}\n{url}"
     except Exception as e:
